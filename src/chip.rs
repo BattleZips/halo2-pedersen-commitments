@@ -1,11 +1,6 @@
-use halo2_gadgets::ecc::chip::BaseFieldElem;
-
 use {
     crate::{
-        constants::{
-            fixed_bases::{BoardCommitR, BoardCommitV, BoardFixedBases},
-            LOOKUP_SIZE,
-        },
+        constants::{fixed_bases::BoardFixedBases, LOOKUP_SIZE},
         gadget::pedersen_commitment,
     },
     halo2_gadgets::{
@@ -17,29 +12,27 @@ use {
     },
     halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter, NamespacedLayouter, Value},
-        pasta::{pallas, EpAffine, Fp, Fq},
-        plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
+        circuit::{AssignedCell, Chip, Layouter, Value},
+        pasta::{EpAffine, Fp, Fq},
+        plonk::{Advice, Column, ConstraintSystem, Error, Fixed, TableColumn},
     },
     std::marker::PhantomData,
 };
 
 #[derive(Clone, Debug)]
-pub struct PedersenCommitmentConfig {
-    pub advice: [Column<Advice>; 10],
-    pub lagrange: [Column<Fixed>; 8], // fixed lagrange coefficients used in ecc
-    pub lookup: LookupRangeCheckConfig<pallas::Base, { LOOKUP_SIZE }>,
+pub struct PedersenCommitmentConfig<F: FieldExt> {
+    pub range_check: LookupRangeCheckConfig<Fp, { LOOKUP_SIZE }>,
     pub ecc: EccConfig<BoardFixedBases>,
+    _marker: PhantomData<F>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PedersenCommitmentChip<F: FieldExt> {
-    config: PedersenCommitmentConfig,
-    _marker: PhantomData<F>,
+    config: PedersenCommitmentConfig<F>,
 }
 
 impl<F: FieldExt> Chip<F> for PedersenCommitmentChip<F> {
-    type Config = PedersenCommitmentConfig;
+    type Config = PedersenCommitmentConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -52,32 +45,35 @@ impl<F: FieldExt> Chip<F> for PedersenCommitmentChip<F> {
 }
 
 impl<F: FieldExt> PedersenCommitmentChip<F> {
-    pub fn new(config: PedersenCommitmentConfig) -> Self {
+    pub fn new(config: PedersenCommitmentConfig<F>) -> Self {
         PedersenCommitmentChip {
             config,
-            _marker: PhantomData,
         }
     }
 
     pub fn configure(
-        meta: &mut ConstraintSystem<pallas::Base>,
+        meta: &mut ConstraintSystem<Fp>,
         advice: [Column<Advice>; 10],
         lagrange: [Column<Fixed>; 8],
-        lookup: LookupRangeCheckConfig<pallas::Base, { LOOKUP_SIZE }>,
-    ) -> PedersenCommitmentConfig {
-        let ecc = EccChip::<BoardFixedBases>::configure(meta, advice, lagrange, lookup);
+        lookup: TableColumn,
+    ) -> PedersenCommitmentConfig<Fp> {
+        // configure range check lookup table chip
+        let range_check: LookupRangeCheckConfig<Fp, { LOOKUP_SIZE }> =
+            LookupRangeCheckConfig::configure(meta, advice[9], lookup);
+        // configure ecc chip
+        let ecc = EccChip::<BoardFixedBases>::configure(meta, advice, lagrange, range_check);
+        // return configuration
         PedersenCommitmentConfig {
-            advice,
-            lagrange,
-            lookup,
+            range_check,
             ecc,
+            _marker: PhantomData,
         }
     }
 
     pub fn synthesize(
         &self,
-        mut layouter: impl Layouter<pallas::Base>,
-        value: AssignedCell<pallas::Base, pallas::Base>,
+        mut layouter: impl Layouter<Fp>,
+        value: &AssignedCell<Fp, Fp>,
         trapdoor: Value<Fq>,
     ) -> Result<Point<EpAffine, EccChip<BoardFixedBases>>, Error> {
         // construct ecc chip
@@ -92,7 +88,7 @@ impl<F: FieldExt> PedersenCommitmentChip<F> {
         Ok(pedersen_commitment(
             layouter.namespace(|| "pedersen commitment"),
             ecc_chip.clone(),
-            value,
+            value.clone(),
             trapdoor,
         )?)
     }
