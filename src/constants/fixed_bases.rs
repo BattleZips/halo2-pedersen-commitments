@@ -18,7 +18,7 @@ pub enum BoardFixedBases {
     BoardCommitR,
 }
 
-/// BoardCommitV is used in scalar mul with a base field element.
+/// BoardCommitV is used in scalar mul with a base field element. (trapdoor)
 /// This is used for the witnessed board state binding commitment
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct BoardCommitV;

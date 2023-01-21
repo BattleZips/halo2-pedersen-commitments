@@ -1,15 +1,78 @@
 use {
-    crate::fixed_bases::{BoardCommitR, BoardCommitV, BoardFixedBases},
-    halo2_gadgets::ecc::{EccInstructions, FixedPoint, FixedPointBaseField, Point, ScalarFixed},
-    halo2_proofs::{
-        circuit::{AssignedCell, Layouter},
-        pasta::pallas,
-        plonk::Error,
+    crate::constants::{
+        fixed_bases::{BoardCommitR, BoardCommitV, BoardFixedBases},
+        LOOKUP_SIZE,
     },
+    halo2_gadgets::{
+        ecc::chip::{EccConfig, EccChip},
+        utilities::lookup_range_check::LookupRangeCheckConfig,
+    },
+    halo2_proofs::{
+        arithmetic::FieldExt,
+        circuit::{AssignedCell, Chip, Layouter},
+        pasta::pallas,
+        plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
+    },
+    std::marker::PhantomData,
 };
 
-pub struct PedersenCommitmentChip
+#[derive(Clone, Debug)]
+pub struct PedersenCommitmentConfig {
+    pub advice: [Column<Advice>; 10],
+    pub lagrange: [Column<Fixed>; 8], // fixed lagrange coefficients used in ecc
+    pub lookup: LookupRangeCheckConfig<pallas::Base, { LOOKUP_SIZE }>,
+    pub ecc: EccConfig<BoardFixedBases>,
+}
 
+#[derive(Clone, Debug)]
+pub struct PedersenCommitmentChip<F: FieldExt> {
+    config: PedersenCommitmentConfig,
+    _marker: PhantomData<F>,
+}
+
+impl<F: FieldExt> Chip<F> for PedersenCommitmentChip<F> {
+    type Config = PedersenCommitmentConfig;
+    type Loaded = ();
+
+    fn config(&self) -> &Self::Config {
+        &self.config
+    }
+
+    fn loaded(&self) -> &Self::Loaded {
+        &()
+    }
+}
+
+impl<F: FieldExt> PedersenCommitmentChip<F> {
+    pub fn new(config: PedersenCommitmentConfig) -> Self {
+        PedersenCommitmentChip {
+            config,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn configure(
+        meta: &mut ConstraintSystem<pallas::Base>,
+        advice: [Column<Advice>; 10],
+        lagrange: [Column<Fixed>; 8],
+        lookup: LookupRangeCheckConfig<pallas::Base, { LOOKUP_SIZE }>
+    ) -> PedersenCommitmentConfig {
+        let ecc = EccChip::configure(meta, advice, lagrange, lookup);
+        PedersenCommitmentConfig {
+            advice,
+            lagrange,
+            lookup,
+            ecc,
+        }
+    }
+
+    pub fn synthesize(
+        &self,
+        mut layouter: impl Layouter<F>,
+        value: AssignedCell<F, F>,
+        entropy: 
+    )
+}
 #[cfg(test)]
 mod tests {
     use halo2_proofs::arithmetic::Field;
@@ -24,11 +87,11 @@ mod tests {
             circuit::{Layouter, SimpleFloorPlanner},
             plonk::{Advice, Circuit, Column, ConstraintSystem},
         },
-        rand::rngs::OsRng
+        rand::rngs::OsRng,
     };
 
     struct PedersenCircuit {
-        test_errors: bool,
+        preimage: pallas::Base,
     }
 
     #[allow(non_snake_case)]
@@ -78,7 +141,6 @@ mod tests {
             mut layouter: impl Layouter<pallas::Base>,
         ) -> Result<(), Error> {
             let scalar_fixed = pallas::Base::random(OsRng);
-
         }
     }
 
