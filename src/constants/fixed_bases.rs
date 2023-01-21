@@ -1,6 +1,6 @@
 use {
     halo2_gadgets::ecc::{
-        chip::{constants::H, BaseFieldElem, FixedPoint, FullScalar },
+        chip::{constants::H, BaseFieldElem, FixedPoint, FullScalar, ShortScalar },
         FixedPoints,
     },
     halo2_proofs::pasta::pallas,
@@ -30,12 +30,12 @@ pub struct BoardCommitR;
 
 /// VESTIGIAL / NOT NEEDED ASIDES FROM ITEM SIGNATURE FOR FIXED POINTS
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct ShortScalar;
+pub struct BoardCommitQ;
 
 impl FixedPoints<pallas::Affine> for BoardFixedBases {
     type Base = BoardCommitV;
     type FullScalar = BoardCommitR;
-    type ShortScalar = ShortScalar;
+    type ShortScalar = BoardCommitQ;
 }
 
 impl FixedPoint<pallas::Affine> for BoardCommitV {
@@ -56,6 +56,22 @@ impl FixedPoint<pallas::Affine> for BoardCommitV {
 
 impl FixedPoint<pallas::Affine> for BoardCommitR {
     type FixedScalarKind = FullScalar;
+
+    fn generator(&self) -> pallas::Affine {
+        board_commit_r::generator()
+    }
+
+    fn u(&self) -> Vec<[[u8; 32]; H]> {
+        board_commit_r::U.to_vec()
+    }
+
+    fn z(&self) -> Vec<u64> {
+        board_commit_r::Z.to_vec()
+    }
+}
+
+impl FixedPoint<pallas::Affine> for BoardCommitQ {
+    type FixedScalarKind = ShortScalar;
 
     fn generator(&self) -> pallas::Affine {
         board_commit_r::generator()

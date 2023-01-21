@@ -1,16 +1,24 @@
+use halo2_gadgets::ecc::chip::BaseFieldElem;
+
 use {
-    crate::constants::{
-        fixed_bases::{BoardCommitR, BoardCommitV, BoardFixedBases},
-        LOOKUP_SIZE,
+    crate::{
+        constants::{
+            fixed_bases::{BoardCommitR, BoardCommitV, BoardFixedBases},
+            LOOKUP_SIZE,
+        },
+        gadget::pedersen_commitment,
     },
     halo2_gadgets::{
-        ecc::chip::{EccConfig, EccChip},
+        ecc::{
+            chip::{EccChip, EccConfig},
+            Point, ScalarFixed,
+        },
         utilities::lookup_range_check::LookupRangeCheckConfig,
     },
     halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter},
-        pasta::pallas,
+        circuit::{AssignedCell, Chip, Layouter, NamespacedLayouter, Value},
+        pasta::{pallas, EpAffine, Fp, Fq},
         plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
     },
     std::marker::PhantomData,
@@ -55,9 +63,9 @@ impl<F: FieldExt> PedersenCommitmentChip<F> {
         meta: &mut ConstraintSystem<pallas::Base>,
         advice: [Column<Advice>; 10],
         lagrange: [Column<Fixed>; 8],
-        lookup: LookupRangeCheckConfig<pallas::Base, { LOOKUP_SIZE }>
+        lookup: LookupRangeCheckConfig<pallas::Base, { LOOKUP_SIZE }>,
     ) -> PedersenCommitmentConfig {
-        let ecc = EccChip::configure(meta, advice, lagrange, lookup);
+        let ecc = EccChip::<BoardFixedBases>::configure(meta, advice, lagrange, lookup);
         PedersenCommitmentConfig {
             advice,
             lagrange,
@@ -68,102 +76,24 @@ impl<F: FieldExt> PedersenCommitmentChip<F> {
 
     pub fn synthesize(
         &self,
-        mut layouter: impl Layouter<F>,
-        value: AssignedCell<F, F>,
-        entropy: 
-    )
-}
-#[cfg(test)]
-mod tests {
-    use halo2_proofs::arithmetic::Field;
-
-    use {
-        super::*,
-        halo2_gadgets::{
-            ecc::chip::{EccChip, EccConfig},
-            utilities::lookup_range_check::LookupRangeCheckConfig,
-        },
-        halo2_proofs::{
-            circuit::{Layouter, SimpleFloorPlanner},
-            plonk::{Advice, Circuit, Column, ConstraintSystem},
-        },
-        rand::rngs::OsRng,
-    };
-
-    struct PedersenCircuit {
-        preimage: pallas::Base,
-    }
-
-    #[allow(non_snake_case)]
-    impl Circuit<pallas::Base> for PedersenCircuit {
-        type Config = EccConfig<BoardFixedBases>;
-        type FloorPlanner = SimpleFloorPlanner;
-
-        fn without_witnesses(&self) -> Self {
-            PedersenCircuit { test_errors: false }
-        }
-
-        fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
-            let advices = [
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-            ];
-            let lookup_table = meta.lookup_table_column();
-            let lagrange_coeffs = [
-                meta.fixed_column(),
-                meta.fixed_column(),
-                meta.fixed_column(),
-                meta.fixed_column(),
-                meta.fixed_column(),
-                meta.fixed_column(),
-                meta.fixed_column(),
-                meta.fixed_column(),
-            ];
-            // Shared fixed column for loading constants
-            let constants = meta.fixed_column();
-            meta.enable_constant(constants);
-
-            let range_check = LookupRangeCheckConfig::configure(meta, advices[9], lookup_table);
-            EccChip::<BoardFixedBases>::configure(meta, advices, lagrange_coeffs, range_check)
-        }
-
-        fn synthesize(
-            &self,
-            config: Self::Config,
-            mut layouter: impl Layouter<pallas::Base>,
-        ) -> Result<(), Error> {
-            let scalar_fixed = pallas::Base::random(OsRng);
-        }
-    }
-
-    #[test]
-    fn ecc_chip() {
-        let k = 13;
-        let circuit = MyCircuit { test_errors: true };
-        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
-        assert_eq!(prover.verify(), Ok(()))
-    }
-
-    #[cfg(feature = "test-dev-graph")]
-    #[test]
-    fn print_ecc_chip() {
-        use plotters::prelude::*;
-
-        let root = BitMapBackend::new("ecc-chip-layout.png", (1024, 7680)).into_drawing_area();
-        root.fill(&WHITE).unwrap();
-        let root = root.titled("Ecc Chip Layout", ("sans-serif", 60)).unwrap();
-
-        let circuit = MyCircuit { test_errors: false };
-        halo2_proofs::dev::CircuitLayout::default()
-            .render(13, &circuit, &root)
-            .unwrap();
+        mut layouter: impl Layouter<pallas::Base>,
+        value: AssignedCell<pallas::Base, pallas::Base>,
+        trapdoor: Value<Fq>,
+    ) -> Result<Point<EpAffine, EccChip<BoardFixedBases>>, Error> {
+        // construct ecc chip
+        let ecc_chip = EccChip::construct(self.config.ecc.clone());
+        // instantiate commitment trapdoor as a full-width scalar
+        let trapdoor = ScalarFixed::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "trapdoor"),
+            trapdoor,
+        )?;
+        // synthesize the pedersen commitment computation
+        Ok(pedersen_commitment(
+            layouter.namespace(|| "pedersen commitment"),
+            ecc_chip.clone(),
+            value,
+            trapdoor,
+        )?)
     }
 }
