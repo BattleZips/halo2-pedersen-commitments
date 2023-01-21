@@ -7,38 +7,37 @@ use {
     halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
-        pasta::{Fp, Fq},
+        pasta::{pallas, Fp, Fq},
         plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
     },
-    std::marker::PhantomData
+    std::marker::PhantomData,
 };
 
 #[derive(Clone, Debug)]
 
-pub struct PedersenCircuitConfig<F: FieldExt> {
+pub struct PedersenCircuitConfig {
     pub instance: Column<Instance>,
     pub pedersen: PedersenCommitmentConfig<Fp>,
-    _marker: PhantomData<F>
 }
 
 #[derive(Clone, Debug)]
 
-pub struct PedersenCommitmentCircuit<F: FieldExt> {
+pub struct PedersenCommitmentCircuit {
     pub message: Value<Fp>,
     pub trapdoor: Value<Fq>,
-    pub config: PedersenCircuitConfig<F>,
+    pub config: PedersenCircuitConfig,
 }
 
 // prove knowledge of the message in a given pedersen commitment
-impl<F: FieldExt> Circuit<F> for PedersenCommitmentCircuit<F> {
-    type Config = PedersenCircuitConfig<F>;
+impl Circuit<Fp> for PedersenCommitmentCircuit {
+    type Config = PedersenCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
         PedersenCommitmentCircuit {
             message: Value::unknown(),
             trapdoor: Value::unknown(),
-            config: self.config.clone()
+            config: self.config.clone(),
         }
     }
 
@@ -74,13 +73,10 @@ impl<F: FieldExt> Circuit<F> for PedersenCommitmentCircuit<F> {
         let instance = meta.instance_column();
         meta.enable_equality(instance);
 
-        let pedersen = PedersenCommitmentChip::<Fp>::configure(meta, advice, lagrange_coeffs, lookup_table);
+        let pedersen =
+            PedersenCommitmentChip::<Fp>::configure(meta, advice, lagrange_coeffs, lookup_table);
 
-        PedersenCircuitConfig {
-            instance,
-            pedersen,
-            _marker: PhantomData
-        }
+        PedersenCircuitConfig { instance, pedersen }
     }
 
     fn synthesize(
@@ -102,12 +98,13 @@ impl<F: FieldExt> Circuit<F> for PedersenCommitmentCircuit<F> {
         )?;
         // synthesize pedersen commitment
         let chip = PedersenCommitmentChip::<Fp>::new(config.pedersen.clone());
-        let commitment = chip.synthesize(layouter, message, self.trapdoor)?;
+        let commitment =
+            chip.synthesize(layouter.namespace(|| "pedersen"), message, self.trapdoor)?;
         // export constrained pedersen commitment to instance column
         let x = commitment.clone().inner().x().cell();
         let y = commitment.clone().inner().y().cell();
         layouter.constrain_instance(x, config.instance, 0)?;
-        layouter.constrain_instance(y, config.instance, 1);
+        layouter.constrain_instance(y, config.instance, 1)?;
         Ok(())
     }
 }
