@@ -6,7 +6,7 @@ use {
 };
 
 
-pub fn derive_commitment(value: pallas::Base, rcv: pallas::Scalar) -> pallas::Point {
+pub fn derive_commitment(value: &pallas::Base, rcv: &pallas::Scalar) -> pallas::Point {
     // get curve points used in scalar multiplication
     let hasher = pallas::Point::hash_to_curve(BOARD_COMMITMENT_PERSONALIZATION);
     let V = hasher(&BOARD_COMMITMENT_V_BYTES);
@@ -29,7 +29,7 @@ mod test {
     fn test_pedersen() {
         let value = pallas::Base::from(100);
         let rcv = pallas::Scalar::from(300);
-        let commitment = derive_commitment(value, rcv).to_affine();
+        let commitment = derive_commitment(&value, &rcv).to_affine();
         println!("commitment: {:?}", commitment);
     }
 }

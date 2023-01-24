@@ -24,9 +24,7 @@ pub struct PedersenCircuitConfig {
 
 pub struct PedersenCommitmentCircuit {
     pub message: Value<Fp>,
-    pub trapdoor: Value<Fq>,
-    pub config: PedersenCircuitConfig,
-}
+    pub trapdoor: Value<Fq>,}
 
 // prove knowledge of the message in a given pedersen commitment
 impl Circuit<Fp> for PedersenCommitmentCircuit {
@@ -37,7 +35,6 @@ impl Circuit<Fp> for PedersenCommitmentCircuit {
         PedersenCommitmentCircuit {
             message: Value::unknown(),
             trapdoor: Value::unknown(),
-            config: self.config.clone(),
         }
     }
 
@@ -109,43 +106,56 @@ impl Circuit<Fp> for PedersenCommitmentCircuit {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use halo2_proofs::arithmetic::Field;
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::utils::{
+            commit::derive_commitment,
+            get_coordinates
+        },
+        halo2_proofs::{
+            dev::MockProver,
+            arithmetic::{Field, CurveAffine},
+            pasta::group::Curve
+        },
+        rand::rngs::OsRng,
+    };
 
-//     use {
-//         super::*,
-//         halo2_gadgets::{
-//             ecc::chip::{EccChip, EccConfig},
-//             utilities::lookup_range_check::LookupRangeCheckConfig,
-//         },
-//         halo2_proofs::{
-//             circuit::{Layouter, SimpleFloorPlanner},
-//             plonk::{Advice, Circuit, Column, ConstraintSystem},
-//         },
-//         rand::rngs::OsRng,
-//     };
+    #[test]
+    fn ecc_chip() {
+        // marshall message into base field element
+        let message = Fp::from(88675409);
+        // marshall entropy sample for trapdoor into scalar field element
+        let trapdoor = Fq::random(&mut OsRng);
+        // compute pedersen commitment
+        let commitment = derive_commitment(&message, &trapdoor).to_affine();
+        let (x, y) = {
+            let x = commitment.clone().coordinates().unwrap().x().to_owned();
+            let y = commitment.clone().coordinates().unwrap().y().to_owned();
+            (x, y)
+        };
+        // instantiate circuit
+        let circuit = PedersenCommitmentCircuit { 
+            message: Value::known(message),
+            trapdoor: Value::known(trapdoor)
+        };
+        let prover = MockProver::run(9, &circuit, vec![vec![x, y]]).unwrap();
+        assert_eq!(prover.verify(), Ok(()))
+    }
 
-//     #[test]
-//     fn ecc_chip() {
-//         let k = 13;
-//         let circuit = MyCircuit { test_errors: true };
-//         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
-//         assert_eq!(prover.verify(), Ok(()))
-//     }
+    #[cfg(feature = "test-dev-graph")]
+    #[test]
+    fn print_ecc_chip() {
+        use plotters::prelude::*;
 
-//     #[cfg(feature = "test-dev-graph")]
-//     #[test]
-//     fn print_ecc_chip() {
-//         use plotters::prelude::*;
+        let root = BitMapBackend::new("ecc-chip-layout.png", (1024, 7680)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root.titled("Ecc Chip Layout", ("sans-serif", 60)).unwrap();
 
-//         let root = BitMapBackend::new("ecc-chip-layout.png", (1024, 7680)).into_drawing_area();
-//         root.fill(&WHITE).unwrap();
-//         let root = root.titled("Ecc Chip Layout", ("sans-serif", 60)).unwrap();
-
-//         let circuit = MyCircuit { test_errors: false };
-//         halo2_proofs::dev::CircuitLayout::default()
-//             .render(13, &circuit, &root)
-//             .unwrap();
-//     }
-// }
+        let circuit = MyCircuit { test_errors: false };
+        halo2_proofs::dev::CircuitLayout::default()
+            .render(13, &circuit, &root)
+            .unwrap();
+    }
+}
