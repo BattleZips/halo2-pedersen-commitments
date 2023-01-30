@@ -7,7 +7,7 @@ use {
     halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
-        pasta::{pallas, Fp, Fq},
+        pasta::{pallas, Fq},
         plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
     },
     std::marker::PhantomData,
@@ -17,17 +17,17 @@ use {
 
 pub struct PedersenCircuitConfig {
     pub instance: Column<Instance>,
-    pub pedersen: PedersenCommitmentConfig<Fp>,
+    pub pedersen: PedersenCommitmentConfig,
 }
 
 #[derive(Clone, Debug)]
 
 pub struct PedersenCommitmentCircuit {
-    pub message: Value<Fp>,
-    pub trapdoor: Value<Fq>,}
+    pub message: Value<pallas::Base>,
+    pub trapdoor: Value<pallas::Scalar>,}
 
 // prove knowledge of the message in a given pedersen commitment
-impl Circuit<Fp> for PedersenCommitmentCircuit {
+impl Circuit<pallas::Base> for PedersenCommitmentCircuit {
     type Config = PedersenCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -38,7 +38,7 @@ impl Circuit<Fp> for PedersenCommitmentCircuit {
         }
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
         let advice = [
             meta.advice_column(),
             meta.advice_column(),
@@ -71,7 +71,7 @@ impl Circuit<Fp> for PedersenCommitmentCircuit {
         meta.enable_equality(instance);
 
         let pedersen =
-            PedersenCommitmentChip::<Fp>::configure(meta, advice, lagrange_coeffs, lookup_table);
+            PedersenCommitmentChip::configure(meta, advice, lagrange_coeffs, lookup_table);
 
         PedersenCircuitConfig { instance, pedersen }
     }
@@ -79,7 +79,7 @@ impl Circuit<Fp> for PedersenCommitmentCircuit {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<pallas::Base>,
     ) -> Result<(), Error> {
         // retrieve advice column from inside ecc chip to witness message
         // column management is intended to be handled at higher level circuit & wont need such references in prod use
@@ -94,7 +94,7 @@ impl Circuit<Fp> for PedersenCommitmentCircuit {
             },
         )?;
         // synthesize pedersen commitment
-        let chip = PedersenCommitmentChip::<Fp>::new(config.pedersen.clone());
+        let chip = PedersenCommitmentChip::new(config.pedersen.clone());
         let commitment =
             chip.synthesize(layouter.namespace(|| "pedersen"), message, self.trapdoor)?;
         // export constrained pedersen commitment to instance column
@@ -125,9 +125,9 @@ mod tests {
     #[test]
     fn ecc_chip() {
         // marshall message into base field element
-        let message = Fp::from(88675409);
+        let message = pallas::Base::from(88675409);
         // marshall entropy sample for trapdoor into scalar field element
-        let trapdoor = Fq::random(&mut OsRng);
+        let trapdoor = pallas::Scalar::random(&mut OsRng);
         // compute pedersen commitment
         let commitment = derive_commitment(&message, &trapdoor).to_affine();
         let (x, y) = {
@@ -140,8 +140,8 @@ mod tests {
             message: Value::known(message),
             trapdoor: Value::known(trapdoor)
         };
-        let prover = MockProver::run(9, &circuit, vec![vec![x, y]]).unwrap();
-        assert_eq!(prover.verify(), Ok(()))
+        let prover = MockProver::run(11, &circuit, vec![vec![x, y]]).unwrap();
+        prover.assert_satisfied()
     }
 
     #[cfg(feature = "test-dev-graph")]

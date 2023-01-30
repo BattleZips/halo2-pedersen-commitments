@@ -13,26 +13,25 @@ use {
     halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{AssignedCell, Chip, Layouter, Value},
-        pasta::{EpAffine, Fp, Fq},
+        pasta::{EpAffine, pallas},
         plonk::{Advice, Column, ConstraintSystem, Error, Fixed, TableColumn},
     },
     std::marker::PhantomData,
 };
 
 #[derive(Clone, Debug)]
-pub struct PedersenCommitmentConfig<F: FieldExt> {
-    pub range_check: LookupRangeCheckConfig<Fp, { LOOKUP_SIZE }>,
+pub struct PedersenCommitmentConfig {
+    pub table_idx: TableColumn,
     pub ecc: EccConfig<BoardFixedBases>,
-    _marker: PhantomData<F>,
 }
 
 #[derive(Clone, Debug)]
-pub struct PedersenCommitmentChip<F: FieldExt> {
-    config: PedersenCommitmentConfig<F>,
+pub struct PedersenCommitmentChip {
+    config: PedersenCommitmentConfig,
 }
 
-impl<F: FieldExt> Chip<F> for PedersenCommitmentChip<F> {
-    type Config = PedersenCommitmentConfig<F>;
+impl Chip<pallas::Base> for PedersenCommitmentChip {
+    type Config = PedersenCommitmentConfig;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -44,38 +43,53 @@ impl<F: FieldExt> Chip<F> for PedersenCommitmentChip<F> {
     }
 }
 
-impl<F: FieldExt> PedersenCommitmentChip<F> {
-    pub fn new(config: PedersenCommitmentConfig<F>) -> Self {
+impl PedersenCommitmentChip {
+    pub fn new(config: PedersenCommitmentConfig) -> Self {
         PedersenCommitmentChip {
             config,
         }
     }
 
     pub fn configure(
-        meta: &mut ConstraintSystem<Fp>,
+        meta: &mut ConstraintSystem<pallas::Base>,
         advice: [Column<Advice>; 10],
         lagrange: [Column<Fixed>; 8],
-        lookup: TableColumn,
-    ) -> PedersenCommitmentConfig<Fp> {
+        table_idx: TableColumn,
+    ) -> PedersenCommitmentConfig {
         // configure range check lookup table chip
-        let range_check: LookupRangeCheckConfig<Fp, { LOOKUP_SIZE }> =
-            LookupRangeCheckConfig::configure(meta, advice[9], lookup);
+        let range_check: LookupRangeCheckConfig<pallas::Base,  LOOKUP_SIZE> =
+            LookupRangeCheckConfig::configure(meta, advice[9], table_idx);
         // configure ecc chip
         let ecc = EccChip::<BoardFixedBases>::configure(meta, advice, lagrange, range_check);
         // return configuration
         PedersenCommitmentConfig {
-            range_check,
+            table_idx,
             ecc,
-            _marker: PhantomData,
         }
     }
 
     pub fn synthesize(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        value: &AssignedCell<Fp, Fp>,
-        trapdoor: Value<Fq>,
+        mut layouter: impl Layouter<pallas::Base>,
+        value: &AssignedCell<pallas::Base, pallas::Base>,
+        trapdoor: Value<pallas::Scalar>,
     ) -> Result<Point<EpAffine, EccChip<BoardFixedBases>>, Error> {
+        // load the lookup table
+        layouter.assign_table(
+            || "table_idx",
+            |mut table| {
+                // We generate the row values lazily (we only need them during keygen).
+                for index in 0..(1 << 10) {
+                    table.assign_cell(
+                        || "table_idx",
+                        self.config.table_idx,
+                        index,
+                        || Value::known(pallas::Base::from(index as u64)),
+                    )?;
+                }
+                Ok(())
+            },
+        )?;
         // construct ecc chip
         let ecc_chip = EccChip::construct(self.config.ecc.clone());
         // instantiate commitment trapdoor as a full-width scalar
